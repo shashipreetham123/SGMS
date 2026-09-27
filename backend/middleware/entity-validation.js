@@ -1,181 +1,167 @@
-const { acceptedFieldAttributes } = require("../config/attr")
+const { checkMinMax, checkLength } = require("../utils")
 
-function checkLength(name, value, field) {
-
-    if (Object.hasOwn(field, "min") && Number.isNaN(parseInt(field.min))) {
-        return ({
-            message: `The Field ${name} Attribute Min is Not a Number`
-        })
-    }
-    if (Object.hasOwn(field, "max") && Number.isNaN(parseInt(field.max))) {
-        return ({
-            message: `The Field ${name} Attribute Max is Not a Number`
-        })
-    }
-    if (Object.hasOwn(field, "length") && Number.isNaN(parseInt(field.length))) {
-        return ({
-            message: `The Field ${name} Attribute Length is Not a Number`
-        })
-
-    }
-    if ((Object.hasOwn(field, "min") && parseInt(field.min) < 0)) {
-        return ({
-            message: `The Field ${name} Attribute Min Cannot be Negative and Max Cannot be Zero`
-        })
-    }
-
-    if ((Object.hasOwn(field, "length") && parseInt(field.length) <= 0) || (Object.hasOwn(field, "max") && parseInt(field.max) <= 0)) {
-        return ({
-            message: `The Field ${name} Attribute Length & Max Cannot be Negative or Zero`
-        })
-    }
-
-    if (Object.hasOwn(field, "min") && Object.hasOwn(field, "max") && parseInt(field.min) >= parseInt(field.max)) {
-        return ({
-            message: `The Field ${name} Attribute Min Should be Less than Max.`
-        })
-    }
-
-    if ((Object.hasOwn(field, "min") && Object.hasOwn(field, "length")) || (Object.hasOwn(field, "max") && Object.hasOwn(field, "length"))) {
-        return ({
-            message: `The Field ${name} Attributes Length is Defined While Min or Max is Defined. Either Define Min, Max or Length`
-        })
-    }
-
-    if (Object.hasOwn(field, "length") && value.length != field.length) {
-        return ({
-            message: `The Expected Length of the Value is ${field.length}`
-        })
-    }
-
-    if (Object.hasOwn(field, "min") && value.length < min) {
-        return ({
-            message: `The Length of the Value is Less Than Min`
-        })
-    }
-    if (Object.hasOwn(field, "max") && value.length > max) {
-        return ({
-            message: `The Length of the Value is Greater Than Max`
-        })
-    }
-
-    return 'valid'
-    
-}
-
-function checkText(name, value, data) {
-
-    // Check If Type is Text
-
-    if (typeof value != "string") {
+function matchPattern(value, field) {
+    const pattern = new RegExp(field.pattern)
+    if (!pattern.test(value)) {
         return {
-            message: `The Type of ${name} is not Text`
+            error: `The Text Doesnt Match the Pattern`
         }
     }
-
-    const status = checkLength(name, value, { min: data.min, max: data.max, length: data.length })
-
-    if (status != 'valid') {
-        return status
-    }
-
-    if (data.pattern) {
-        const pattern = new RegExp(data.pattern)
-
-        if (pattern.test(value)) {
-            return {
-                message: "The Value Doesnt Match the Pattern"
-            }
-        }
-    }
-
-    return 'valid'
 }
 
-function validateEntity(req, res, next) {
+function checkMinMaxAndLen(value, field) {
+    const min_max = checkMinMax(field)
+    const len = checkLength(value, field)
 
-    const entity = req.body
+    if (min_max.error)
+        return min_max
 
-    if (!entity.profile) {
-        return res.status(400).json({
-            message: "The Attribute Profile is Required",
-            data: null
-        })
+    if (len.error)
+        return len
+
+}
+
+function checkType(value, field) {
+
+    let type = field.type
+
+    if (field.type == "text") {
+        type = "string"
     }
 
-    const db = req.app.locals.db
-
-    const profile = db.collection("profiles").findOne({ name: entity.profile })
-
-    if (!profile) {
-        return res.status(400).json({
-            message: `The Profile ${entity.profile} is Not found`,
-            data: null
-        })
+    if (typeof value != type) {
+        return {
+            error: `The Value for ${field.name} is not ${field.type}`
+        }
     }
+}
 
-    if (!profile.fields) {
-        return res.status(400).json({
-            message: `The Profile ${entity.profile} Doesnt Have any Fields`,
-            data: null
-        })
-    }
 
-    if (!entity.data) {
-        return res.status(400).json({
-            message: `The Enitity ${entity.name} Doesnt Have Data`,
-            data: null
-        })
-    }
+async function validateEntity(req, res, next) {
 
-    // Check If Entity has Valid Data
+    try {
 
-    const entityData = entity.data
+        const entity = req.body
 
-    const fields = profile.fields
+        const db = req.app.locals.db
 
-    const errors = []
+        // Checking for Required Entries
 
-    // Check for Each Field that its Corresponding Entity Data is Valid
+        // Checkinf if Entity Name Exists.
 
-    for (let i = 0; i < fields.length; i++) {
-        const field = fields[i]
+        const entityName = entity.name
 
-        const fieldName = field.name
-        const fieldType = field.type
-        const required = field.required ? true : false
+        if (!entityName) {
+            return res.status(400).json({
+                message: "Entity Name is Required"
+            })
+        }
 
-        // Check if Required Field Exist in Enitity
+        // Check if Profile Exist.
 
-        if (required) {
+        const profileName = entity.profile
 
-            if (!entityData[fieldName]) {
-                errors.push({
-                    message: `Required Field ${fieldName}`,
-                    data: entityData
+        if (!profileName) {
+            return res.status(400).json({
+                message: "Profile is Required"
+            })
+        }
+
+        // Check if Profile is Valid
+
+        const profile = await db.collection("profiles").findOne({ name: profileName })
+
+        if (!profile) {
+            return res.status(400).json({
+                message: `Unknown Profile ${profileName}`
+            })
+        }
+
+        // Check if Entity Data Exists
+
+        const entityData = entity.data
+
+        if (!entityData) {
+            return res.status(400).json({
+                message: "Entity Data is Required"
+            })
+        }
+
+        // Checking if Entity Data Has Unknown Fields
+
+        const field_names = profile.fieldNames
+
+        Object.keys(entityData).forEach(key => {
+            if (!field_names.includes(key)) {
+                return res.status(400).json({
+                    message: `Unknown Field ${key} is Present in Entity`
                 })
+            }
+        })
 
-                break
+        // Checking if Entity Data is Valid
+
+        for (let i = 0; i < profile.fields.length; i++) {
+
+            const field = profile.fields[i]
+
+            const fieldValue = entityData[field.name]
+
+
+            const required = field.required ? true : false
+
+            if (!fieldValue) {
+                return res.status(400).json({
+                    message: `Entity Doesnt Contain the Field ${field.name}`
+                })
             }
 
-        } else {
-            if (!entityData[fieldName]) {
-                continue
+            if (required && (fieldValue == null || fieldValue == undefined || fieldValue == "")) {
+                return res.status(400).json({
+                    message: `The Field ${field.name} is Required`
+                })
+            }
+
+            if (field.type == "text") {
+
+                const type_val = checkType(fieldValue, field)
+                const min_max_len_val = checkMinMaxAndLen(fieldValue, field)
+
+                if (type_val)
+                    return res.status(400).json({ message: `${field.name} : ${type_val.error}` })
+
+                if (min_max_len_val)
+                    return res.status(400).json({ message: `${field.name} : ${min_max_len_val.error}` })
+
+                if (field.pattern) {
+                    const pattern_val = matchPattern(value, field)
+                    if (pattern_val) {
+                        return res.status(400).json({ message: `${field.name} : ${pattern_val.error}` })
+                    }
+                }
+
+            }else if (field.type == "number") {
+
+                const type_val = checkType(fieldValue, field)
+                const min_max_len_val = checkMinMaxAndLen(fieldValue, field)
+
+                if (type_val)
+                    return res.status(400).json({ message: type_val.error })
+
+                if (min_max_len_val)
+                    return res.status(400).json({ message: min_max_len_val.error })
+
             }
         }
 
-        if (fieldType == "text") {
+        next()
 
-            const status = checkText(fieldName, entityData[fieldName], field)
-
-            if (status != 'valid') {
-
-                res.status(400).json(status)
-
-            }
-
-        }
-
+    } catch (error) {
+        return res.status(500).json({
+            message: "Internal Server Error."
+        })
     }
 
 }
+
+module.exports = { validateEntity }

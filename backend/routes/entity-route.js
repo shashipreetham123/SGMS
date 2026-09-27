@@ -1,5 +1,7 @@
 const express = require("express")
 
+const { validateEntity } = require("../middleware/entity-validation")
+
 const router = express.Router()
 
 router.get("/", async (req, res) => {
@@ -12,10 +14,9 @@ router.get("/", async (req, res) => {
 
 })
 
-router.post("/", async (req, res) => {
+router.post("/", validateEntity, async (req, res) => {
 
-    
-
+    res.json(req.body)
 })
 
 module.exports = router

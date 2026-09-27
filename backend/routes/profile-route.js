@@ -2,7 +2,7 @@ const express = require("express")
 
 const router = express.Router()
 
-const { validateFields, validateLengths, normalizeFields } = require("../middleware/profile-field-validation")
+const { validateFields, normalizeFields, validateMinMax } = require("../middleware/profile-field-validation")
 
 router.get("/", async (req, res) => {
 
@@ -52,7 +52,7 @@ router.get("/o/names", async (req, res) => {
     }
 });
 
-router.post("/", validateFields, validateLengths, normalizeFields, async (req, res) => {
+router.post("/", validateFields, validateMinMax, normalizeFields, async (req, res) => {
 
     try {
 
@@ -60,8 +60,15 @@ router.post("/", validateFields, validateLengths, normalizeFields, async (req, r
 
         const data = req.body
 
+        const fieldNames = []
+
+        for (let i = 0; i < data.fields.length; i++) {
+            fieldNames.push(data.fields[i].name)
+        }
+
         await db.collection("profiles").insertOne({
-            ...data
+            ...data,
+            fieldNames
         })
 
         res.status(201).json({
